@@ -6,7 +6,11 @@ Gem::Specification.new do |s|
   s.description = "integrate jquery wookmark plugin into rails asset pipline"
   s.authors     = ["Road Tang"]
   s.email       = 'roadtang@gmail.com'
-  s.files       = ["lib/jquery-wookmark-rails.rb"]
+
+  s.files        = `git ls-files`.split("\n")
+  s.executables  = `git ls-files -- bin/*`.split("\n").map { |f| File.basename(f) }
+  s.require_path = 'lib'
+
   s.homepage    =  'http://github.com/roadt/jquery-wookmark-rails'
   s.license       = 'MIT'
 end
