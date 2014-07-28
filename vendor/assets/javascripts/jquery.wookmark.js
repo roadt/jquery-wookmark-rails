@@ -3,10 +3,10 @@
   @name jquery.wookmark.js
   @author Christoph Ono (chri@sto.ph or @gbks)
   @author Sebastian Helzle (sebastian@helzle.net or @sebobo)
-  @version 1.4.3
-  @date 8/25/2013
+  @version 1.4.8
+  @date 07/08/2013
   @category jQuery plugin
-  @copyright (c) 2009-2013 Christoph Ono (www.wookmark.com)
+  @copyright (c) 2009-2014 Christoph Ono (www.wookmark.com)
   @license Licensed under the MIT (http://www.opensource.org/licenses/mit-license.php) license.
 */
 (function (factory) {
@@ -15,7 +15,6 @@
   else
     factory(jQuery);
 }(function ($) {
-
   var Wookmark, defaultOptions, __bind;
 
   __bind = function(fn, me) {
@@ -30,17 +29,38 @@
     autoResize: false,
     comparator: null,
     container: $('body'),
+    direction: undefined,
     ignoreInactiveItems: true,
     itemWidth: 0,
     fillEmptySpace: false,
     flexibleWidth: 0,
-    direction: undefined,
     offset: 2,
-    onLayoutChanged: undefined,
     outerOffset: 0,
-    resizeDelay: 50
+    onLayoutChanged: undefined,
+    possibleFilters: [],
+    resizeDelay: 50,
+    verticalOffset: undefined
   };
 
+  // Function for executing css writes to dom on the next animation frame if supported
+  var executeNextFrame = window.requestAnimationFrame || function(callback) {callback();},
+      $window = $(window);
+
+  function bulkUpdateCSS(data) {
+    executeNextFrame(function() {
+      var i, item;
+      for (i = 0; i < data.length; i++) {
+        item = data[i];
+        item.obj.css(item.css);
+      }
+    });
+  }
+
+  function cleanFilterName(filterName) {
+    return $.trim(filterName).toLowerCase();
+  }
+
+  // Main wookmark plugin class
   Wookmark = (function() {
 
     function Wookmark(handler, options) {
@@ -52,6 +72,8 @@
       this.placeholders = [];
 
       $.extend(true, this, defaultOptions, options);
+
+      this.verticalOffset = this.verticalOffset || this.offset;
 
       // Bind instance methods
       this.update = __bind(this.update, this);
@@ -66,36 +88,49 @@
       this.getActiveItems = __bind(this.getActiveItems, this);
       this.refreshPlaceholders = __bind(this.refreshPlaceholders, this);
       this.sortElements = __bind(this.sortElements, this);
+      this.updateFilterClasses = __bind(this.updateFilterClasses, this);
 
+      // Initial update of the filter classes
+      this.updateFilterClasses();
+
+      // Listen to resize event if requested.
+      if (this.autoResize)
+        $window.bind('resize.wookmark', this.onResize);
+
+      this.container.bind('refreshWookmark', this.onRefresh);
+    }
+
+    Wookmark.prototype.updateFilterClasses = function() {
       // Collect filter data
-      var i = 0, j = 0, filterClasses = {}, itemFilterClasses, $item, filterClass;
+      var i = 0, j = 0, k = 0, filterClasses = {}, itemFilterClasses,
+          $item, filterClass, possibleFilters = this.possibleFilters, possibleFilter;
 
-      for (; i < handler.length; i++) {
-        $item = handler.eq(i);
+      for (; i < this.handler.length; i++) {
+        $item = this.handler.eq(i);
 
-        // Read filter classes
+        // Read filter classes and globally store each filter class as object and the fitting items in the array
         itemFilterClasses = $item.data('filterClass');
-
-        // Globally store each filter class as object and the fitting items in the array
         if (typeof itemFilterClasses == 'object' && itemFilterClasses.length > 0) {
           for (j = 0; j < itemFilterClasses.length; j++) {
-            filterClass = $.trim(itemFilterClasses[j]).toLowerCase();
+            filterClass = cleanFilterName(itemFilterClasses[j]);
 
-            if (!(filterClass in filterClasses)) {
+            if (typeof(filterClasses[filterClass]) === 'undefined') {
               filterClasses[filterClass] = [];
             }
             filterClasses[filterClass].push($item[0]);
           }
         }
       }
+
+      for (; k < possibleFilters.length; k++) {
+        possibleFilter = cleanFilterName(possibleFilters[k]);
+        if (!(possibleFilter in filterClasses)) {
+          filterClasses[possibleFilter] = [];
+        }
+      }
+
       this.filterClasses = filterClasses;
-
-      // Listen to resize event if requested.
-      if (this.autoResize)
-        $(window).bind('resize.wookmark', this.onResize);
-
-      this.container.bind('refreshWookmark', this.onRefresh);
-    }
+    };
 
     // Method for updating the plugins options
     Wookmark.prototype.update = function(options) {
@@ -121,17 +156,18 @@
      * @param filters array of string
      * @param mode 'or' or 'and'
      */
-    Wookmark.prototype.filter = function(filters, mode) {
+    Wookmark.prototype.filter = function(filters, mode, dryRun) {
       var activeFilters = [], activeFiltersLength, activeItems = $(),
           i, j, k, filter;
 
       filters = filters || [];
       mode = mode || 'or';
+      dryRun = dryRun || false;
 
       if (filters.length) {
         // Collect active filters
         for (i = 0; i < filters.length; i++) {
-          filter = $.trim(filters[i].toLowerCase());
+          filter = cleanFilterName(filters[i]);
           if (filter in this.filterClasses) {
             activeFilters.push(this.filterClasses[filter]);
           }
@@ -157,6 +193,7 @@
           }
 
           // Iterate over shortest filter and find elements in other filter classes
+          shortestFilter = shortestFilter || [];
           for (i = 0; i < shortestFilter.length; i++) {
             currentItem = shortestFilter[i];
             itemValid = true;
@@ -176,18 +213,21 @@
           }
         }
         // Hide inactive items
-        this.handler.not(activeItems).addClass('inactive');
+        if (!dryRun)
+          this.handler.not(activeItems).addClass('inactive');
       } else {
         // Show all items if no filter is selected
         activeItems = this.handler;
       }
 
       // Show active items
-      activeItems.removeClass('inactive');
-
-      // Unset columns and refresh grid for a full layout
-      this.columns = null;
-      this.layout();
+      if (!dryRun) {
+        activeItems.removeClass('inactive');
+        // Unset columns and refresh grid for a full layout
+        this.columns = null;
+        this.layout();
+      }
+      return activeItems;
     };
 
     /**
@@ -205,7 +245,7 @@
         this.placeholders.push($placeholder);
       }
 
-      innerOffset = this.offset + parseInt(this.placeholders[0].css('borderWidth'), 10) * 2;
+      innerOffset = this.offset + parseInt(this.placeholders[0].css('borderLeftWidth'), 10) * 2;
 
       for (i = 0; i < this.placeholders.length; i++) {
         $placeholder = this.placeholders[i];
@@ -216,7 +256,7 @@
         } else {
           $lastColumnItem = column[column.length - 1];
           if (!$lastColumnItem) continue;
-          top = $lastColumnItem.data('wookmark-top') + $lastColumnItem.data('wookmark-height') + this.offset;
+          top = $lastColumnItem.data('wookmark-top') + $lastColumnItem.data('wookmark-height') + this.verticalOffset;
           height = containerHeight - top - innerOffset;
 
           $placeholder.css({
@@ -256,7 +296,11 @@
           flexibleWidth = parseFloat(flexibleWidth) / 100 * innerWidth;
         }
 
-        var columns = ~~(0.5 + (innerWidth + this.offset) / (flexibleWidth + this.offset)),
+        // Find highest column count
+        var paddedInnerWidth = (innerWidth + this.offset),
+            flexibleColumns = ~~(0.5 + paddedInnerWidth / (flexibleWidth + this.offset)),
+            fixedColumns = ~~(paddedInnerWidth / (itemWidth + this.offset)),
+            columns = Math.max(flexibleColumns, fixedColumns),
             columnWidth = Math.min(flexibleWidth, ~~((innerWidth - (columns - 1) * this.offset) / columns));
 
         itemWidth = Math.max(itemWidth, columnWidth);
@@ -284,12 +328,13 @@
           $item;
 
       // Cache item height
-      if (this.itemHeightsDirty) {
+      if (this.itemHeightsDirty || !this.container.data('itemHeightsInitialized')) {
         for (; i < activeItemsLength; i++) {
           $item = activeItems.eq(i);
           $item.data('wookmark-height', $item.outerHeight());
         }
         this.itemHeightsDirty = false;
+        this.container.data('itemHeightsInitialized', true);
       }
 
       // Use less columns if there are to few items
@@ -340,8 +385,7 @@
           activeItems = $.makeArray(this.getActiveItems()),
           length = activeItems.length,
           shortest = null, shortestIndex = null,
-          itemCSS = {position: 'absolute'},
-          sideOffset, heights = [],
+          sideOffset, heights = [], itemBulkCSS = [],
           leftAligned = this.align == 'left' ? true : false;
 
       this.columns = [];
@@ -368,6 +412,7 @@
             shortestIndex = k;
           }
         }
+        $item.data('wookmark-top', shortest);
 
         // stick to left side if alignment is left and this is the first column
         sideOffset = offset;
@@ -375,14 +420,20 @@
           sideOffset += shortestIndex * columnWidth;
 
         // Position the item.
-        itemCSS[this.direction] = sideOffset;
-        itemCSS.top = shortest;
-        $item.css(itemCSS).data('wookmark-top', shortest);
+        (itemBulkCSS[i] = {
+          obj: $item,
+          css: {
+            position: 'absolute',
+            top: shortest
+          }
+        }).css[this.direction] = sideOffset;
 
         // Update column height and store item in shortest column
-        heights[shortestIndex] += $item.data('wookmark-height') + this.offset;
+        heights[shortestIndex] += $item.data('wookmark-height') + this.verticalOffset;
         this.columns[shortestIndex].push($item);
       }
+
+      bulkUpdateCSS(itemBulkCSS);
 
       // Return longest column
       return Math.max.apply(Math, heights);
@@ -393,9 +444,9 @@
      * existing column assignments.
      */
     Wookmark.prototype.layoutColumns = function(columnWidth, offset) {
-      var heights = [],
-          i = 0, k = 0, currentHeight,
-          column, $item, itemCSS, sideOffset;
+      var heights = [], itemBulkCSS = [],
+          i = 0, k = 0, j = 0, currentHeight,
+          column, $item, itemData, sideOffset;
 
       for (; i < this.columns.length; i++) {
         heights.push(this.outerOffset);
@@ -403,31 +454,34 @@
         sideOffset = i * columnWidth + offset;
         currentHeight = heights[i];
 
-        for (k = 0; k < column.length; k++) {
-          $item = column[k];
-          itemCSS = {
-            top: currentHeight
-          };
-          itemCSS[this.direction] = sideOffset;
+        for (k = 0; k < column.length; k++, j++) {
+          $item = column[k].data('wookmark-top', currentHeight);
+          (itemBulkCSS[j] = {
+            obj: $item,
+            css: {
+              top: currentHeight
+            }
+          }).css[this.direction] = sideOffset;
 
-          $item.css(itemCSS).data('wookmark-top', currentHeight);
-
-          currentHeight += $item.data('wookmark-height') + this.offset;
+          currentHeight += $item.data('wookmark-height') + this.verticalOffset;
         }
         heights[i] = currentHeight;
       }
+
+      bulkUpdateCSS(itemBulkCSS);
 
       // Return longest column
       return Math.max.apply(Math, heights);
     };
 
     /**
-     * Clear event listeners and time outs.
+     * Clear event listeners and time outs and the instance itself
      */
     Wookmark.prototype.clear = function() {
       clearTimeout(this.resizeTimer);
-      $(window).unbind('resize.wookmark', this.onResize);
+      $window.unbind('resize.wookmark', this.onResize);
       this.container.unbind('refreshWookmark', this.onRefresh);
+      this.handler.wookmarkInstance = null;
     };
 
     return Wookmark;
